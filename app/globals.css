@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+/* ---------- Report tables (shared, screen + print) ---------- */
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "Sarabun", "Inter", serif;
+  font-size: 11pt;
+}
+.report-table th,
+.report-table td {
+  border: 1px solid #111;
+  padding: 6px 9px;
+  vertical-align: top;
+  text-align: left;
+}
+.report-table thead th {
+  background: #f1f1f1;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 9.5pt;
+  letter-spacing: 0.04em;
+}
+.report-table td.num,
+.report-table th.num {
+  text-align: center;
+  width: 5%;
+  font-variant-numeric: tabular-nums;
+}
+.report-table td.scenes {
+  font-variant-numeric: tabular-nums;
+}
+
+.report-title {
+  font-family: "Sarabun", "Inter", serif;
+  font-weight: 700;
+  font-size: 18pt;
+  margin: 0 0 4px;
+}
+.report-meta {
+  font-size: 10pt;
+  color: #444;
+  margin-bottom: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.report-meta span strong {
+  font-weight: 600;
+  color: #111;
+}
+
+/* ---------- Print layout ---------- */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 18mm 14mm 18mm 14mm;
+  }
+  body {
+    background: white;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .report-sheet {
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    background: white !important;
+  }
+  .report-table {
+    font-size: 10.5pt;
+  }
+  .report-table thead {
+    display: table-header-group;
+  }
+  .report-table tr {
+    page-break-inside: avoid;
+  }
+  .report-footer {
+    position: running(footer);
+  }
+}
+
+.print-only {
+  display: none;
+}
