@@ -168,7 +168,6 @@ export async function POST(request: NextRequest) {
       output_config: {
         format: {
           type: "json_schema",
-          name: "screenplay_breakdown",
           schema: SCREENPLAY_SCHEMA,
         },
       },
