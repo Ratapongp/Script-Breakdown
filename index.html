@@ -505,6 +505,7 @@
     </div>
     <div class="rpt-actions">
       <button class="btn-act btn-new" onclick="resetApp()">New File</button>
+      <button class="btn-act btn-new" onclick="toggleDebug()" id="btn-debug" style="display:none">Debug</button>
       <button class="btn-act btn-pdf" onclick="window.print()">Export PDF</button>
     </div>
   </div>
@@ -545,6 +546,16 @@
     <div id="locs-body"></div>
   </div>
 
+  <!-- Debug panel (hidden by default) -->
+  <div id="sec-debug" style="display:none; margin-bottom:60px;">
+    <div class="section-hd">
+      <div class="section-title" style="color:var(--accent);border-color:var(--accent);">Debug · Extracted Text</div>
+      <button class="btn-copy" onclick="document.getElementById('sec-debug').style.display='none'">Hide</button>
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;" id="debug-summary"></p>
+    <pre id="debug-lines" style="font-size:11px;line-height:1.7;color:var(--text-sub);white-space:pre-wrap;word-break:break-all;background:var(--gray-1);padding:16px;border-radius:3px;max-height:400px;overflow-y:auto;"></pre>
+  </div>
+
 </div><!-- /results-screen -->
 
 <script>
@@ -557,7 +568,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 /* ──────────────────────────────────────────────────────────
    State
 ────────────────────────────────────────────────────────── */
-let _data = null;
+let _data  = null;
+let _lines = [];
 
 /* ──────────────────────────────────────────────────────────
    Upload / Drag-drop
@@ -604,10 +616,12 @@ async function handleFile(file) {
     const lines = await extractLines(pdf);
 
     setMsg('Analyzing scenes…');
-    _data = parse(lines);
+    _lines = lines;
+    _data  = parse(lines);
 
     setMsg('Building report…');
     render(_data, file.name);
+    populateDebug(lines, _data);
     showScreen('results');
 
   } catch (err) {
@@ -618,7 +632,7 @@ async function handleFile(file) {
 }
 
 /* ──────────────────────────────────────────────────────────
-   PDF text extraction
+   PDF text extraction  (robust version)
 ────────────────────────────────────────────────────────── */
 async function extractLines(pdf) {
   const allLines = [];
@@ -627,35 +641,62 @@ async function extractLines(pdf) {
     const page    = await pdf.getPage(p);
     const content = await page.getTextContent();
 
-    // Sort items: top→bottom, left→right
-    const items = [...content.items].sort((a, b) => {
-      const dy = b.transform[5] - a.transform[5];
-      if (Math.abs(dy) > 3) return dy;
-      return a.transform[4] - b.transform[4];
+    if (!content.items.length) continue;
+
+    // Collect items with position & real width
+    const items = content.items
+      .filter(it => it.str && it.str.trim())
+      .map(it => ({
+        x:     it.transform[4],
+        y:     it.transform[5],
+        right: it.transform[4] + Math.abs(it.width || 0),
+        text:  it.str,
+      }));
+
+    if (!items.length) continue;
+
+    // Adaptive y-tolerance: median font height / 2
+    items.sort((a, b) => b.y - a.y);
+    const yVals = items.map(i => i.y);
+    const yDiffs = [];
+    for (let i = 1; i < yVals.length; i++) {
+      const d = yVals[i - 1] - yVals[i];
+      if (d > 0.5 && d < 30) yDiffs.push(d);
+    }
+    yDiffs.sort((a, b) => a - b);
+    const medLine = yDiffs[Math.floor(yDiffs.length / 2)] || 12;
+    const yTol   = Math.max(2, medLine * 0.55);
+
+    // Group by y proximity
+    items.sort((a, b) => {
+      const dy = b.y - a.y;
+      if (Math.abs(dy) > yTol) return dy;
+      return a.x - b.x;
     });
 
-    // Group into lines by y-coordinate proximity
-    const pageLines = [];
+    const groups = [];
     let cur = null;
 
     for (const it of items) {
-      const y = it.transform[5];
-      const x = it.transform[4];
-      const s = it.str || '';
-
-      if (!cur || Math.abs(y - cur.y) > 3) {
-        cur = { y, x, text: s };
-        pageLines.push(cur);
+      if (!cur || Math.abs(it.y - cur.y) > yTol) {
+        cur = { y: it.y, parts: [it] };
+        groups.push(cur);
       } else {
-        // Append; add space if gap between items
-        const lastX = cur.x + (cur.width || 0);
-        cur.text += (x - lastX > 3 ? ' ' : '') + s;
-        cur.width = (x - cur.x) + (it.width || s.length * 6);
+        cur.parts.push(it);
       }
     }
 
-    for (const l of pageLines) {
-      const t = l.text.trim();
+    for (const g of groups) {
+      g.parts.sort((a, b) => a.x - b.x);
+      let line = '';
+      let prevRight = -Infinity;
+      for (const pt of g.parts) {
+        const gap = pt.x - prevRight;
+        if (line && gap > 3) line += ' ';
+        line += pt.text;
+        prevRight = Math.max(prevRight, pt.right);
+      }
+      const t = line.trim();
       if (t) allLines.push(t);
     }
   }
@@ -667,8 +708,12 @@ async function extractLines(pdf) {
    Screenplay parser
 ────────────────────────────────────────────────────────── */
 function parse(lines) {
-  /* Scene heading regex ─ flexible dash variants */
-  const HEADING = /^(INT\.\/EXT\.|EXT\.\/INT\.|INT\.|EXT\.|I\/E\.?)\s+(.+?)\s*[-–—]+\s*(DAY|NIGHT|DAWN|DUSK|MORNING|AFTERNOON|EVENING|CONTINUOUS|CONT'D|LATER|MONTAGE|FLASHBACK|DREAM|INTERCUT)\b/i;
+  /* Scene heading regex — tolerant of:
+     - optional leading scene number  "42. INT. …" or "A42 INT …"
+     - dot optional after INT/EXT     "INT LOCATION - DAY"
+     - any dash variant               - – —
+     - trailing notes                 "(CONTINUED)" etc               */
+  const HEADING = /^(?:[A-Z]?\d+[A-Z]?\.?\s+)?(INT\.?\/EXT\.?|EXT\.?\/INT\.?|INT\.?|EXT\.?|I\/E\.?)\s+(.+?)\s*[-–—]+\s*(DAY|NIGHT|DAWN|DUSK|MORNING|AFTERNOON|EVENING|CONTINUOUS|CONT['']D|LATER|MONTAGE|FLASHBACK|DREAM|INTERCUT)\b/i;
 
   /* Transitions & formatting lines to ignore */
   const SKIP = /^(FADE\s+IN|FADE\s+OUT|FADE\s+TO|CUT\s+TO|SMASH\s+CUT|MATCH\s+CUT|DISSOLVE|TITLE\s+CARD|THE\s+END|OVER\s+BLACK|CONTINUED|MORE\b|CONT['']D|BACK\s+TO|END\s+OF\s+ACT|ACT\s+[IVX\d]+|TEASER|COLD\s+OPEN|TAG\s+SCENE|SCENE\s+\d|INTERCUT\s+WITH)/i;
@@ -953,6 +998,30 @@ function copyTable(key, btn) {
 }
 
 /* ──────────────────────────────────────────────────────────
+   Debug helpers
+────────────────────────────────────────────────────────── */
+function populateDebug(lines, data) {
+  document.getElementById('debug-summary').textContent =
+    `${lines.length} lines extracted · ${data.scenes.length} scenes found · ${data.characters.length} characters · ${data.locations.length} locations`;
+
+  // Show first 80 lines + any line that looks like a potential heading
+  const preview = lines.slice(0, 80).map((l, i) => `${String(i+1).padStart(3,' ')}  ${l}`);
+  document.getElementById('debug-lines').textContent = preview.join('\n');
+
+  // Show Debug button only when scenes=0 (problem mode) or always?
+  // Show always but visible only when needed
+  document.getElementById('btn-debug').style.display = 'inline-block';
+  if (data.scenes.length === 0) {
+    document.getElementById('sec-debug').style.display = 'block';
+  }
+}
+
+function toggleDebug() {
+  const el = document.getElementById('sec-debug');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+/* ──────────────────────────────────────────────────────────
    UI helpers
 ────────────────────────────────────────────────────────── */
 function showScreen(name) {
@@ -976,8 +1045,11 @@ function hideError() {
 }
 
 function resetApp() {
-  _data = null;
+  _data  = null;
+  _lines = [];
   fileInput.value = '';
+  document.getElementById('sec-debug').style.display = 'none';
+  document.getElementById('btn-debug').style.display = 'none';
   showScreen('upload');
 }
 
