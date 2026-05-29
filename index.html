@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screenplay Breakdown</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #FFFFFF;
+      --text:         #1C1C2E;
+      --text-sub:     #5A5A72;
+      --text-muted:   #9A9AAE;
+      --accent:       #C87740;
+      --accent-bg:    #FDF3EA;
+      --purple:       #4A3F8F;
+      --purple-bg:    #EDEAF8;
+      --navy-dark:    #11112A;
+      --gray-1:       #F7F7F9;
+      --gray-2:       #EEEEEE;
+      --border:       #E0E0E8;
+      --green:        #2E7D52;
+      --red-bg:       #FFF3F3;
+      --red:          #C0392B;
+    }
+
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ───────────────────────────────────────────
+       UPLOAD SCREEN
+    ─────────────────────────────────────────── */
+    #upload-screen {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
+    }
+
+    .brand {
+      text-align: center;
+      margin-bottom: 52px;
+      user-select: none;
+    }
+
+    .brand-sub {
+      font-size: 11px;
+      letter-spacing: 5px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      font-weight: 400;
+      margin-bottom: 10px;
+    }
+
+    .brand-title {
+      font-size: 30px;
+      font-weight: 200;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+
+    .brand-rule {
+      width: 36px;
+      height: 2px;
+      background: var(--accent);
+      margin: 14px auto 0;
+    }
+
+    .drop-zone {
+      width: 100%;
+      max-width: 500px;
+      border: 1.5px dashed var(--border);
+      border-radius: 3px;
+      padding: 56px 40px 44px;
+      text-align: center;
+      transition: border-color 0.2s, background 0.2s;
+      background: var(--bg);
+      cursor: pointer;
+    }
+
+    .drop-zone:hover,
+    .drop-zone.over {
+      border-color: var(--accent);
+      background: var(--accent-bg);
+    }
+
+    .drop-zone:hover .upload-icon,
+    .drop-zone.over .upload-icon { opacity: 0.5; }
+
+    .upload-icon {
+      width: 44px;
+      height: 44px;
+      margin: 0 auto 22px;
+      opacity: 0.2;
+      transition: opacity 0.2s;
+      color: var(--text);
+    }
+
+    .drop-title {
+      font-size: 13px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+
+    .drop-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+      line-height: 1.6;
+    }
+
+    .btn-choose {
+      display: inline-block;
+      padding: 10px 30px;
+      background: var(--text);
+      color: #fff;
+      font-size: 11px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      cursor: pointer;
+      border: none;
+      border-radius: 2px;
+      transition: background 0.2s;
+      font-family: inherit;
+    }
+
+    .btn-choose:hover { background: var(--purple); }
+
+    #file-input { display: none; }
+
+    .drop-note {
+      margin-top: 18px;
+      font-size: 10.5px;
+      color: var(--text-muted);
+      letter-spacing: 0.3px;
+      line-height: 1.5;
+    }
+
+    .error-msg {
+      margin-top: 16px;
+      padding: 14px 20px;
+      background: var(--red-bg);
+      border: 1px solid #FFCCCC;
+      border-radius: 3px;
+      font-size: 12.5px;
+      color: var(--red);
+      max-width: 500px;
+      width: 100%;
+      text-align: left;
+    }
+
+    /* ───────────────────────────────────────────
+       LOADING SCREEN
+    ─────────────────────────────────────────── */
+    #loading-screen {
+      display: none;
+      min-height: 100vh;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+    }
+
+    .loading-label {
+      font-size: 11px;
+      letter-spacing: 3.5px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .loading-track {
+      width: 180px;
+      height: 2px;
+      background: var(--gray-2);
+      border-radius: 1px;
+      overflow: hidden;
+    }
+
+    .loading-fill {
+      height: 100%;
+      width: 30%;
+      background: var(--accent);
+      border-radius: 1px;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%   { width: 10%; transform: translateX(0); }
+      50%  { width: 55%; }
+      100% { width: 10%; transform: translateX(1100%); }
+    }
+
+    /* ───────────────────────────────────────────
+       RESULTS SCREEN
+    ─────────────────────────────────────────── */
+    #results-screen {
+      display: none;
+      max-width: 940px;
+      margin: 0 auto;
+      padding: 0 40px 100px;
+    }
+
+    /* Top bar */
+    .rpt-topbar {
+      padding: 30px 0 22px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .rpt-title {
+      font-size: 18px;
+      font-weight: 300;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+
+    .rpt-subtitle {
+      font-size: 10px;
+      letter-spacing: 3.5px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-top: 5px;
+      font-weight: 500;
+    }
+
+    .rpt-actions { display: flex; gap: 8px; align-items: center; }
+
+    .btn-act {
+      padding: 8px 20px;
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-radius: 2px;
+      font-family: inherit;
+      transition: all 0.18s;
+    }
+
+    .btn-new {
+      background: var(--bg);
+      color: var(--text-sub);
+      border: 1px solid var(--border);
+    }
+    .btn-new:hover { border-color: var(--text); color: var(--text); }
+
+    .btn-pdf {
+      background: var(--text);
+      color: #fff;
+      border: 1px solid var(--text);
+    }
+    .btn-pdf:hover { background: var(--purple); border-color: var(--purple); }
+
+    /* Accent rule */
+    .rpt-rule {
+      height: 3px;
+      background: linear-gradient(to right, var(--accent) 0%, transparent 100%);
+      margin-bottom: 44px;
+    }
+
+    /* Section wrapper */
+    .rpt-section { margin-bottom: 60px; }
+
+    .section-hd {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 24px;
+    }
+
+    .section-title {
+      font-size: 10px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      font-weight: 600;
+      color: var(--text);
+      padding-bottom: 7px;
+      border-bottom: 1.5px solid var(--text);
+    }
+
+    /* Copy button */
+    .btn-copy {
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      cursor: pointer;
+      background: none;
+      border: 1px solid var(--border);
+      padding: 4px 13px;
+      border-radius: 2px;
+      font-family: inherit;
+      transition: all 0.18s;
+    }
+    .btn-copy:hover { color: var(--text); border-color: var(--text); }
+    .btn-copy.ok { color: var(--green); border-color: var(--green); }
+
+    /* ─── STAT CARDS ─── */
+    .stat-row {
+      display: grid;
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      margin-bottom: 1px;
+    }
+    .stat-row-6 { grid-template-columns: repeat(6, 1fr); }
+    .stat-row-3 { grid-template-columns: repeat(3, 1fr); }
+
+    .stat-card {
+      background: var(--bg);
+      padding: 26px 16px 20px;
+      text-align: center;
+    }
+
+    .stat-num {
+      font-size: 44px;
+      font-weight: 200;
+      color: var(--purple);
+      line-height: 1;
+      margin-bottom: 10px;
+      letter-spacing: -1px;
+    }
+
+    .stat-lbl {
+      font-size: 8.5px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    /* ─── TABLES ─── */
+    .rpt-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+
+    .rpt-table thead th {
+      font-size: 8.5px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      font-weight: 500;
+      padding: 9px 12px;
+      text-align: left;
+      background: var(--gray-1);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .rpt-table thead th.col-num { width: 44px; }
+    .rpt-table thead th.col-cnt { width: 70px; }
+    .rpt-table thead th.col-ie  { width: 90px; }
+    .rpt-table thead th.col-dn  { width: 110px; }
+
+    .rpt-table tbody tr {
+      border-bottom: 1px solid var(--gray-2);
+      transition: background 0.1s;
+    }
+    .rpt-table tbody tr:last-child { border-bottom: none; }
+    .rpt-table tbody tr:hover { background: var(--gray-1); }
+
+    .rpt-table tbody td {
+      padding: 10px 12px;
+      vertical-align: middle;
+      line-height: 1.4;
+    }
+
+    .cell-num {
+      font-weight: 600;
+      color: var(--purple);
+      font-size: 13px;
+    }
+
+    .cell-name { font-weight: 450; }
+
+    .cell-count {
+      color: var(--purple);
+      font-size: 13px;
+      font-weight: 400;
+    }
+
+    .cell-scenes {
+      font-size: 11px;
+      color: var(--text-sub);
+      font-family: 'Courier New', monospace;
+      letter-spacing: 0.3px;
+    }
+
+    /* Tags */
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      font-size: 8.5px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      border-radius: 2px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .t-int   { background: var(--purple-bg); color: var(--purple); }
+    .t-ext   { background: var(--accent-bg); color: var(--accent); }
+    .t-ie    { background: var(--gray-2); color: var(--text-sub); }
+    .t-day   { background: #FFFBEA; color: #856A10; }
+    .t-night { background: var(--navy-dark); color: #B8B0D8; }
+    .t-cont  { background: var(--gray-2); color: var(--text-sub); }
+    .t-mont  { background: #EAF3FF; color: #1A5FAD; }
+
+    /* Empty state */
+    .empty-note {
+      padding: 20px 0;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    /* ─── PRINT STYLES ─── */
+    @media print {
+      body { background: #fff; }
+      #upload-screen, #loading-screen { display: none !important; }
+      #results-screen { display: block !important; padding: 0 20px 40px; }
+      .rpt-actions, .btn-copy { display: none !important; }
+      .rpt-topbar { padding: 16px 0 12px; }
+      .rpt-table tbody tr:hover { background: none; }
+      .rpt-section { page-break-inside: avoid; margin-bottom: 40px; }
+      .stat-card { padding: 16px 12px; }
+      .stat-num { font-size: 32px; }
+      @page { margin: 20mm; }
+    }
+
+    @media (max-width: 640px) {
+      #results-screen { padding: 0 16px 60px; }
+      .stat-row-6 { grid-template-columns: repeat(3, 1fr); }
+      .stat-row-3 { grid-template-columns: repeat(3, 1fr); }
+      .stat-num { font-size: 32px; }
+      .rpt-topbar { flex-direction: column; gap: 16px; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════
+     UPLOAD SCREEN
+══════════════════════════════════════ -->
+<div id="upload-screen">
+  <div class="brand">
+    <div class="brand-sub">Production Tool</div>
+    <div class="brand-title">Screenplay Breakdown</div>
+    <div class="brand-rule"></div>
+  </div>
+
+  <div class="drop-zone" id="drop-zone">
+    <svg class="upload-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="6" y="2" width="28" height="38" rx="2"/>
+      <path d="M34 2l8 8v36a2 2 0 01-2 2H8a2 2 0 01-2-2"/>
+      <path d="M34 2v8h8"/>
+      <path d="M20 32V20m0 0l-5 5m5-5l5 5"/>
+    </svg>
+    <div class="drop-title">Upload Screenplay PDF</div>
+    <div class="drop-sub">
+      Drag &amp; drop a PDF file here<br>or click to browse
+    </div>
+    <label class="btn-choose" for="file-input">Choose File</label>
+    <input type="file" id="file-input" accept=".pdf">
+    <div class="drop-note">
+      Supports standard screenplay format<br>
+      Scene headings must follow: <strong>INT./EXT. LOCATION — DAY/NIGHT</strong>
+    </div>
+  </div>
+  <div id="upload-error" style="display:none;" class="error-msg"></div>
+</div>
+
+<!-- ══════════════════════════════════════
+     LOADING SCREEN
+══════════════════════════════════════ -->
+<div id="loading-screen">
+  <div class="loading-label" id="loading-msg">Reading PDF…</div>
+  <div class="loading-track"><div class="loading-fill"></div></div>
+</div>
+
+<!-- ══════════════════════════════════════
+     RESULTS SCREEN
+══════════════════════════════════════ -->
+<div id="results-screen">
+
+  <div class="rpt-topbar">
+    <div>
+      <div class="rpt-title" id="rpt-title">—</div>
+      <div class="rpt-subtitle">Screenplay Breakdown Report</div>
+    </div>
+    <div class="rpt-actions">
+      <button class="btn-act btn-new" onclick="resetApp()">New File</button>
+      <button class="btn-act btn-pdf" onclick="window.print()">Export PDF</button>
+    </div>
+  </div>
+  <div class="rpt-rule"></div>
+
+  <!-- 1. Scene Summary -->
+  <div class="rpt-section" id="sec-summary">
+    <div class="section-hd">
+      <div class="section-title">Scene Summary</div>
+    </div>
+    <div id="summary-body"></div>
+  </div>
+
+  <!-- 2. Scene List -->
+  <div class="rpt-section" id="sec-scenes">
+    <div class="section-hd">
+      <div class="section-title">Scene List</div>
+      <button class="btn-copy" id="cp-scenes" onclick="copyTable('scenes', this)">Copy</button>
+    </div>
+    <div id="scenes-body"></div>
+  </div>
+
+  <!-- 3. Cast -->
+  <div class="rpt-section" id="sec-cast">
+    <div class="section-hd">
+      <div class="section-title">Cast</div>
+      <button class="btn-copy" id="cp-cast" onclick="copyTable('cast', this)">Copy</button>
+    </div>
+    <div id="cast-body"></div>
+  </div>
+
+  <!-- 4. Locations -->
+  <div class="rpt-section" id="sec-locs">
+    <div class="section-hd">
+      <div class="section-title">Locations</div>
+      <button class="btn-copy" id="cp-locs" onclick="copyTable('locs', this)">Copy</button>
+    </div>
+    <div id="locs-body"></div>
+  </div>
+
+</div><!-- /results-screen -->
+
+<script>
+/* ──────────────────────────────────────────────────────────
+   PDF.js worker
+────────────────────────────────────────────────────────── */
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+/* ──────────────────────────────────────────────────────────
+   State
+────────────────────────────────────────────────────────── */
+let _data = null;
+
+/* ──────────────────────────────────────────────────────────
+   Upload / Drag-drop
+────────────────────────────────────────────────────────── */
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('click', (e) => {
+  if (!e.target.closest('label') && !e.target.closest('#file-input')) {
+    fileInput.click();
+  }
+});
+
+dropZone.addEventListener('dragover',  (e) => { e.preventDefault(); dropZone.classList.add('over'); });
+dropZone.addEventListener('dragleave', ()  => { dropZone.classList.remove('over'); });
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+
+fileInput.addEventListener('change', (e) => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+/* ──────────────────────────────────────────────────────────
+   Main flow
+────────────────────────────────────────────────────────── */
+async function handleFile(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    showError('Please upload a PDF file.');
+    return;
+  }
+  hideError();
+  showScreen('loading');
+
+  try {
+    setMsg('Reading PDF…');
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+
+    setMsg(`Parsing ${pdf.numPages} page${pdf.numPages > 1 ? 's' : ''}…`);
+    const lines = await extractLines(pdf);
+
+    setMsg('Analyzing scenes…');
+    _data = parse(lines);
+
+    setMsg('Building report…');
+    render(_data, file.name);
+    showScreen('results');
+
+  } catch (err) {
+    console.error(err);
+    showScreen('upload');
+    showError('Could not process this PDF: ' + err.message);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────
+   PDF text extraction
+────────────────────────────────────────────────────────── */
+async function extractLines(pdf) {
+  const allLines = [];
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page    = await pdf.getPage(p);
+    const content = await page.getTextContent();
+
+    // Sort items: top→bottom, left→right
+    const items = [...content.items].sort((a, b) => {
+      const dy = b.transform[5] - a.transform[5];
+      if (Math.abs(dy) > 3) return dy;
+      return a.transform[4] - b.transform[4];
+    });
+
+    // Group into lines by y-coordinate proximity
+    const pageLines = [];
+    let cur = null;
+
+    for (const it of items) {
+      const y = it.transform[5];
+      const x = it.transform[4];
+      const s = it.str || '';
+
+      if (!cur || Math.abs(y - cur.y) > 3) {
+        cur = { y, x, text: s };
+        pageLines.push(cur);
+      } else {
+        // Append; add space if gap between items
+        const lastX = cur.x + (cur.width || 0);
+        cur.text += (x - lastX > 3 ? ' ' : '') + s;
+        cur.width = (x - cur.x) + (it.width || s.length * 6);
+      }
+    }
+
+    for (const l of pageLines) {
+      const t = l.text.trim();
+      if (t) allLines.push(t);
+    }
+  }
+
+  return allLines;
+}
+
+/* ──────────────────────────────────────────────────────────
+   Screenplay parser
+────────────────────────────────────────────────────────── */
+function parse(lines) {
+  /* Scene heading regex ─ flexible dash variants */
+  const HEADING = /^(INT\.\/EXT\.|EXT\.\/INT\.|INT\.|EXT\.|I\/E\.?)\s+(.+?)\s*[-–—]+\s*(DAY|NIGHT|DAWN|DUSK|MORNING|AFTERNOON|EVENING|CONTINUOUS|CONT'D|LATER|MONTAGE|FLASHBACK|DREAM|INTERCUT)\b/i;
+
+  /* Transitions & formatting lines to ignore */
+  const SKIP = /^(FADE\s+IN|FADE\s+OUT|FADE\s+TO|CUT\s+TO|SMASH\s+CUT|MATCH\s+CUT|DISSOLVE|TITLE\s+CARD|THE\s+END|OVER\s+BLACK|CONTINUED|MORE\b|CONT['']D|BACK\s+TO|END\s+OF\s+ACT|ACT\s+[IVX\d]+|TEASER|COLD\s+OPEN|TAG\s+SCENE|SCENE\s+\d|INTERCUT\s+WITH)/i;
+
+  /* ALL-CAPS character cue: letters, spaces, apostrophes, hyphens, dots */
+  const CHAR_LINE = /^[A-Z][A-Z\s'\-\.]{1,38}[A-Z\.]?(\s*\([^)]{0,30}\))?$/;
+
+  const scenes     = [];
+  const charMap    = {};   // name → Set<sceneNum>
+  const locMap     = {};   // KEY  → { name, scenes:[] }
+
+  let sceneNum   = 0;
+  let curScene   = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // ── Scene heading ──
+    const hm = line.match(HEADING);
+    if (hm) {
+      sceneNum++;
+
+      const rawIE = hm[1].toUpperCase().replace(/\./g, '').replace(/\s/g, '');
+      let ie;
+      if      (rawIE.startsWith('INT') && rawIE.includes('EXT')) ie = 'INT/EXT';
+      else if (rawIE.startsWith('INT'))                          ie = 'INT';
+      else                                                        ie = 'EXT';
+
+      let time = hm[3].toUpperCase();
+      if (['DAWN','DUSK','MORNING','AFTERNOON','EVENING'].includes(time)) time = 'DAY';
+      else if (['CONTINUOUS',"CONT'D",'LATER'].includes(time))            time = 'CONTINUOUS';
+
+      const loc = hm[2].trim();
+      curScene  = { number: sceneNum, ie, location: loc, time, characters: [] };
+      scenes.push(curScene);
+
+      const key = loc.toUpperCase();
+      if (!locMap[key]) locMap[key] = { name: loc, scenes: [] };
+      locMap[key].scenes.push(sceneNum);
+      continue;
+    }
+
+    // ── Character cue ──
+    if (curScene && CHAR_LINE.test(line) && !SKIP.test(line)) {
+      const name = line.replace(/\([^)]*\)/g, '').trim();
+
+      if (name.length >= 2 && name.length <= 40 && !/^\d/.test(name)) {
+        // Verify next non-empty line is dialogue or parenthetical
+        let nextLine = '';
+        for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+          const l = lines[j].trim();
+          if (l) { nextLine = l; break; }
+        }
+        const looksLikeDialogue =
+          nextLine.startsWith('(') ||
+          (nextLine.length > 0 &&
+           !nextLine.match(HEADING) &&
+           !nextLine.match(CHAR_LINE));
+
+        if (looksLikeDialogue) {
+          if (!curScene.characters.includes(name)) {
+            curScene.characters.push(name);
+          }
+          if (!charMap[name]) charMap[name] = new Set();
+          charMap[name].add(sceneNum);
+        }
+      }
+    }
+  }
+
+  // ── Aggregate characters ──
+  const characters = Object.entries(charMap)
+    .map(([name, set]) => ({
+      name,
+      count: set.size,
+      scenes: [...set].sort((a, b) => a - b)
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  // ── Aggregate locations ──
+  const locations = Object.values(locMap)
+    .map(l => ({ ...l, count: l.scenes.length }))
+    .sort((a, b) => b.count - a.count);
+
+  // ── Statistics ──
+  const stats = {
+    total:      scenes.length,
+    intDay:     scenes.filter(s => s.ie === 'INT'     && s.time === 'DAY').length,
+    extDay:     scenes.filter(s => s.ie === 'EXT'     && s.time === 'DAY').length,
+    intNight:   scenes.filter(s => s.ie === 'INT'     && s.time === 'NIGHT').length,
+    extNight:   scenes.filter(s => s.ie === 'EXT'     && s.time === 'NIGHT').length,
+    montage:    scenes.filter(s => s.time === 'MONTAGE').length,
+    namedCast:  characters.length,
+    locCount:   locations.length,
+    dayScenes:  scenes.filter(s => s.time === 'DAY').length,
+  };
+
+  return { scenes, characters, locations, stats };
+}
+
+/* ──────────────────────────────────────────────────────────
+   Render
+────────────────────────────────────────────────────────── */
+function render(data, filename) {
+  // Title from filename
+  const title = filename
+    .replace(/\.pdf$/i, '')
+    .replace(/[-_]/g, ' ')
+    .toUpperCase();
+  document.getElementById('rpt-title').textContent = title;
+
+  renderSummary(data.stats);
+  renderScenes(data.scenes);
+  renderCast(data.characters);
+  renderLocations(data.locations);
+}
+
+function renderSummary(s) {
+  document.getElementById('summary-body').innerHTML = `
+    <div class="stat-row stat-row-6">
+      ${sc(s.total,    'Total Scenes')}
+      ${sc(s.intDay,   'INT · DAY')}
+      ${sc(s.extDay,   'EXT · DAY')}
+      ${sc(s.intNight, 'INT · NIGHT')}
+      ${sc(s.extNight, 'EXT · NIGHT')}
+      ${sc(s.montage,  'Montage')}
+    </div>
+    <div class="stat-row stat-row-3">
+      ${sc(s.namedCast, 'Named Cast')}
+      ${sc(s.locCount,  'Locations')}
+      ${sc(s.dayScenes, 'Day Scenes')}
+    </div>
+  `;
+}
+
+function sc(n, lbl) {
+  return `<div class="stat-card"><div class="stat-num">${n}</div><div class="stat-lbl">${lbl}</div></div>`;
+}
+
+function ieTag(ie) {
+  if (ie === 'INT')     return `<span class="tag t-int">INT</span>`;
+  if (ie === 'EXT')     return `<span class="tag t-ext">EXT</span>`;
+  return                        `<span class="tag t-ie">INT/EXT</span>`;
+}
+
+function timeTag(t) {
+  if (t === 'DAY')        return `<span class="tag t-day">DAY</span>`;
+  if (t === 'NIGHT')      return `<span class="tag t-night">NIGHT</span>`;
+  if (t === 'MONTAGE')    return `<span class="tag t-mont">MONTAGE</span>`;
+  if (t === 'CONTINUOUS') return `<span class="tag t-cont">CONT.</span>`;
+  return                          `<span class="tag t-cont">${t}</span>`;
+}
+
+function renderScenes(scenes) {
+  const el = document.getElementById('scenes-body');
+  if (!scenes.length) {
+    el.innerHTML = '<div class="empty-note">No scene headings found. Ensure the screenplay uses standard format: <strong>INT./EXT. LOCATION — DAY/NIGHT</strong></div>';
+    return;
+  }
+  const rows = scenes.map(s => `
+    <tr>
+      <td class="cell-num">${s.number}</td>
+      <td>${ieTag(s.ie)}</td>
+      <td class="cell-name">${esc(s.location)}</td>
+      <td>${timeTag(s.time)}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <table class="rpt-table">
+      <thead>
+        <tr>
+          <th class="col-num">#</th>
+          <th class="col-ie">INT / EXT</th>
+          <th>Location</th>
+          <th class="col-dn">Day / Night</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderCast(chars) {
+  const el = document.getElementById('cast-body');
+  if (!chars.length) {
+    el.innerHTML = '<div class="empty-note">No character cues detected. Characters are identified from ALL CAPS dialogue cues in the screenplay text.</div>';
+    return;
+  }
+  const rows = chars.map((c, i) => `
+    <tr>
+      <td class="cell-num">${i + 1}</td>
+      <td class="cell-name">${esc(c.name)}</td>
+      <td class="cell-count">${c.count}</td>
+      <td class="cell-scenes">${c.scenes.join(', ')}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <table class="rpt-table">
+      <thead>
+        <tr>
+          <th class="col-num">#</th>
+          <th>Character</th>
+          <th class="col-cnt">Scenes</th>
+          <th>Appears in Scene #</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderLocations(locs) {
+  const el = document.getElementById('locs-body');
+  if (!locs.length) {
+    el.innerHTML = '<div class="empty-note">No locations found.</div>';
+    return;
+  }
+  const rows = locs.map((l, i) => `
+    <tr>
+      <td class="cell-num">${i + 1}</td>
+      <td class="cell-name">${esc(l.name)}</td>
+      <td class="cell-count">${l.count}</td>
+      <td class="cell-scenes">${l.scenes.join(', ')}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <table class="rpt-table">
+      <thead>
+        <tr>
+          <th class="col-num">#</th>
+          <th>Location</th>
+          <th class="col-cnt">Scenes</th>
+          <th>Scene #</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+/* ──────────────────────────────────────────────────────────
+   Copy to Clipboard
+────────────────────────────────────────────────────────── */
+function copyTable(key, btn) {
+  if (!_data) return;
+  let lines = [];
+
+  if (key === 'scenes') {
+    lines = ['#\tINT/EXT\tLOCATION\tDAY/NIGHT',
+      ..._data.scenes.map(s => `${s.number}\t${s.ie}\t${s.location}\t${s.time}`)];
+  } else if (key === 'cast') {
+    lines = ['#\tCHARACTER\tSCENES\tAPPEARS IN',
+      ..._data.characters.map((c, i) => `${i+1}\t${c.name}\t${c.count}\t${c.scenes.join(', ')}`)];
+  } else if (key === 'locs') {
+    lines = ['#\tLOCATION\tSCENES\tSCENE #',
+      ..._data.locations.map((l, i) => `${i+1}\t${l.name}\t${l.count}\t${l.scenes.join(', ')}`)];
+  }
+
+  const text = lines.join('\n');
+
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity  = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  };
+
+  const done = () => {
+    const orig = btn.textContent;
+    btn.textContent = 'Copied';
+    btn.classList.add('ok');
+    setTimeout(() => { btn.textContent = orig; btn.classList.remove('ok'); }, 2000);
+  };
+
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(done).catch(fallback);
+  } else {
+    fallback();
+    done();
+  }
+}
+
+/* ──────────────────────────────────────────────────────────
+   UI helpers
+────────────────────────────────────────────────────────── */
+function showScreen(name) {
+  document.getElementById('upload-screen').style.display  = name === 'upload'  ? 'flex'  : 'none';
+  document.getElementById('loading-screen').style.display = name === 'loading' ? 'flex'  : 'none';
+  document.getElementById('results-screen').style.display = name === 'results' ? 'block' : 'none';
+}
+
+function setMsg(t) {
+  document.getElementById('loading-msg').textContent = t;
+}
+
+function showError(msg) {
+  const el = document.getElementById('upload-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideError() {
+  document.getElementById('upload-error').style.display = 'none';
+}
+
+function resetApp() {
+  _data = null;
+  fileInput.value = '';
+  showScreen('upload');
+}
+
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+</script>
+</body>
+</html>
