@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
     // Streaming is required because long responses can blow past the SDK's
     // ~10 minute HTTP timeout (SDK refuses non-streaming for big max_tokens).
     const stream = client.messages.stream({
-      model: "claude-opus-4-8",
+      model: "claude-sonnet-4-6",
       max_tokens: 32000,
       thinking: { type: "adaptive" },
       output_config: {
