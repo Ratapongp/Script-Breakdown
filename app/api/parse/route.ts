@@ -67,15 +67,11 @@ Return ONLY the JSON object. No markdown, no commentary.`;
 const USER_PROMPT =
   "Extract every scene from this Thai screenplay PDF using the rules. Return the JSON only.";
 
-// Count pages from a PDF buffer using pdf.js (node-friendly legacy build).
+// Count pages with pdf-lib — pure Node, no Web Worker needed in serverless.
 async function countPdfPages(data: ArrayBuffer): Promise<number> {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const pdf = await pdfjs.getDocument({
-    data: new Uint8Array(data),
-    useSystemFonts: true,
-    isEvalSupported: false,
-  }).promise;
-  return pdf.numPages;
+  const { PDFDocument } = await import("pdf-lib");
+  const pdf = await PDFDocument.load(data, { ignoreEncryption: true });
+  return pdf.getPageCount();
 }
 
 export async function POST(request: NextRequest) {
