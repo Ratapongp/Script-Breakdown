@@ -9,7 +9,7 @@ import {
   parseScreenplayPdfOcr,
   type OcrProgress,
 } from "@/lib/parser";
-import { parseScreenplayPdfWithClaude, type ParseMeta } from "@/lib/claude-parser";
+import { parseScreenplayPdfWithClaude, type ParseMeta, type ParseProgress } from "@/lib/claude-parser";
 import { SceneReport } from "@/components/reports/SceneReport";
 import { CharacterReport } from "@/components/reports/CharacterReport";
 import { LocationReport } from "@/components/reports/LocationReport";
@@ -66,15 +66,30 @@ export default function HomePage() {
       .catch(() => {});
   }, [isSignedIn, lastMeta]);
 
+  function formatProgress(p: ParseProgress): string {
+    switch (p.phase) {
+      case "starting":
+        return `📄 ${p.pageCount} pages · ${p.creditsRequired} credit${p.creditsRequired > 1 ? "s" : ""}${p.isAdmin ? " (admin · free)" : ""}`;
+      case "claude_streaming":
+        return "🧠 Claude is reading the screenplay…";
+      case "tick": {
+        const sec = Math.round(p.elapsedMs / 1000);
+        return `🧠 Reading… ${sec}s elapsed · ${p.chars.toLocaleString()} chars received`;
+      }
+      case "done":
+        return "✅ Finished — building reports";
+      case "error":
+        return `❌ ${p.error}`;
+    }
+  }
+
   async function handleFile(file: File) {
     setLoading(true);
     setError(null);
     setActive(null);
     setLastMeta(null);
     setLoadingLabel(
-      parseMode === "claude"
-        ? "Parsing with Claude API (30–90s)…"
-        : "Parsing…",
+      parseMode === "claude" ? "Starting Claude…" : "Parsing…",
     );
     try {
       const buf = await file.arrayBuffer();
@@ -83,6 +98,7 @@ export default function HomePage() {
       if (parseMode === "claude") {
         const { doc: parsed, meta } = await parseScreenplayPdfWithClaude(buf.slice(0), {
           sourceName: file.name,
+          onProgress: (p) => setLoadingLabel(formatProgress(p)),
         });
         setDoc(parsed);
         setLastMeta(meta ?? null);
@@ -235,7 +251,7 @@ export default function HomePage() {
                 </div>
                 <p className="mt-2 text-xs text-neutral-500">
                   {parseMode === "claude"
-                    ? `Claude reads the PDF directly with full Thai tone marks. Uses ⌈pages/${PAGES_PER_CREDIT}⌉ credits.`
+                    ? `Claude Haiku reads the PDF directly with full Thai tone marks (~15-30s). Uses ⌈pages/${PAGES_PER_CREDIT}⌉ credits.`
                     : "Browser-side text extraction. Free but Thai tone marks may be lost on some PDFs."}
                 </p>
               </div>
