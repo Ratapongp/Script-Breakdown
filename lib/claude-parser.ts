@@ -73,17 +73,22 @@ export async function parseScreenplayPdfWithClaude(
   if (!res.body) throw new Error("No response body");
 
   // Stream of NDJSON events
+  interface StreamResult {
+    title: string | null;
+    draft_date: string | null;
+    scenes: ClaudeScene[];
+    meta: ParseMeta;
+  }
+  interface StreamEvent {
+    phase: string;
+    result?: StreamResult;
+    error?: string;
+  }
+
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let result:
-    | {
-        title: string | null;
-        draft_date: string | null;
-        scenes: ClaudeScene[];
-        meta: ParseMeta;
-      }
-    | null = null;
+  let result: StreamResult | null = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -93,20 +98,19 @@ export async function parseScreenplayPdfWithClaude(
     buffer = lines.pop() ?? "";
     for (const line of lines) {
       if (!line.trim()) continue;
-      let event: unknown;
+      let event: StreamEvent;
       try {
-        event = JSON.parse(line);
+        event = JSON.parse(line) as StreamEvent;
       } catch {
         continue;
       }
-      const e = event as { phase: string; result?: typeof result; error?: string };
-      if (e.phase === "done" && e.result) {
-        result = e.result;
+      if (event.phase === "done" && event.result) {
+        result = event.result;
         opts.onProgress?.({ phase: "done" });
-      } else if (e.phase === "error") {
-        throw new Error(e.error ?? "Unknown parse error");
+      } else if (event.phase === "error") {
+        throw new Error(event.error ?? "Unknown parse error");
       } else {
-        opts.onProgress?.(e as ParseProgress);
+        opts.onProgress?.(event as unknown as ParseProgress);
       }
     }
   }
