@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { getAuthedUser } from "@/lib/auth-helpers";
+import { getOrCreateUser, supabaseAdmin, deductCredits } from "@/lib/supabase";
+import { creditsForPages, PAGES_PER_CREDIT } from "@/lib/pricing";
 
 export const runtime = "nodejs";
-// 5 min — Claude PDF reads on a 44-page screenplay typically take 30–90s.
-// Vercel Pro plan or higher is required for maxDuration > 60s.
 export const maxDuration = 300;
 
-// JSON schema fed to Claude's structured-output mode (output_config.format).
-// Keep this aligned with lib/scenes.ts ScreenplayDoc.
 const SCREENPLAY_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -40,14 +39,7 @@ const SCREENPLAY_SCHEMA = {
           characters: { type: "array", items: { type: "string" } },
           extras: { type: "array", items: { type: "string" } },
         },
-        required: [
-          "number",
-          "type",
-          "location",
-          "time_of_day",
-          "characters",
-          "extras",
-        ],
+        required: ["number", "type", "location", "time_of_day", "characters", "extras"],
       },
     },
   },
@@ -58,211 +50,170 @@ const SYSTEM_PROMPT = `You are an expert script supervisor and screenplay breakd
 
 Your job: read the attached PDF and extract EVERY scene as structured JSON.
 
-RULES — read carefully:
+RULES:
+1. Include every numbered scene from 1 to the last. Do not skip any.
+2. Include MONTAGE, FLASHBACK, DREAM, INTERCUT, PRESENT, and "SERIES OF SHOTS" sequences when they are numbered as scenes.
+3. Use Thai text EXACTLY with ALL tone marks and vowels (ล่า not ลา, ห้อง not หอง, ผึ้ง not ผง).
+4. Normalise character name spelling — pick one canonical form per character across all scenes.
+5. The characters appearing in the scene are in parentheses on the line after the heading, comma-separated.
+6. EXTRA entries (prefixed with "EXTRA") go in extras[], not characters[].
+7. "type" must be one of: INT, EXT, INT/EXT, MONTAGE, FLASHBACK, DREAM, PRESENT, INTERCUT, SERIES OF SHOTS.
+8. "location" is the FULL Thai location string (e.g., "ห้องครัวบ้านมธุสร", not "ห้องครัว").
+9. "time_of_day" uppercased (DAY, NIGHT, MORNING, EVENING, DUSK, DAWN, LATER, CONTINUOUS) or "" if absent.
+10. "title" = episode title from header. "draft_date" = "DD/MM/YY" from leading number (e.g., "290669" → "29/06/69"), or null.
 
-1. SCOPE
-   - Include every numbered scene from scene 1 to the last numbered scene. Do not skip any.
-   - Include MONTAGE, FLASHBACK, DREAM, INTERCUT, PRESENT, and "SERIES OF SHOTS" sequences when they are numbered as scenes — they count.
-
-2. TEXT FIDELITY
-   - Use Thai text EXACTLY as it appears in the PDF, with ALL tone marks and vowels (ล่า not ลา, ห้อง not หอง, ผึ้ง not ผง).
-   - Do NOT transliterate, romanise, translate, or "correct" Thai spellings.
-
-3. CHARACTER NAME NORMALISATION
-   - Within a single screenplay, a character must appear with ONE consistent spelling across all scenes.
-   - If you see the same character written as "ผึ้ง" in some scenes and "ผึง" in others, pick the most common / correct form and use it everywhere.
-   - Do NOT split one character into two entries because of inconsistent typing.
-
-4. CHARACTER LIST FORMAT
-   - The characters appearing in a scene are listed in parentheses on the line immediately after the scene heading, comma-separated.
-   - Example: (มธุสร, ผึ้ง, เสกสรร)
-   - Put these in the "characters" array, trimmed, in the order they appear.
-
-5. EXTRA CAST
-   - EXTRA entries appear inside the same parentheses, prefixed with the word "EXTRA" (uppercase).
-   - Example: (มธุสร, ผึ้ง, EXTRA ครู-นักเรียน) — characters = ["มธุสร", "ผึ้ง"], extras = ["ครู-นักเรียน"]
-   - Take what follows "EXTRA" as the description (trim leading colon, dash, or space).
-   - Do NOT invent or estimate quantities; only extract descriptions written in the screenplay.
-
-6. SCENE HEADING SHAPE
-   - Standard: "<number> INT.<location> - <time>" or "<number> EXT.<location> - <time>"
-   - Combined: "<number> INT/EXT.<location> - <time>"
-   - MONTAGE-style: "<number> MONTAGE - <description>" (time may be absent — use empty string)
-   - The "type" field must be one of: INT, EXT, INT/EXT, MONTAGE, FLASHBACK, DREAM, PRESENT, INTERCUT, SERIES OF SHOTS.
-
-7. LOCATION
-   - Include the FULL Thai location string as written (e.g., "ห้องครัวบ้านมธุสร", not just "ห้องครัว"; "ห้องประชุมโรงเรียนกัลยาณีวิทย์", not just "ห้องประชุม").
-   - Do not abbreviate or shorten.
-
-8. TIME OF DAY
-   - Use the exact word from the screenplay, uppercased: DAY, NIGHT, MORNING, EVENING, DUSK, DAWN, LATER, CONTINUOUS, etc.
-   - If absent (e.g., for MONTAGE), use empty string "".
-
-9. TITLE & DRAFT DATE
-   - The header at the top of every page typically reads like "290669 Screenplay ล่า EP.1 | 1".
-   - "title" = the episode title (e.g., "ล่า EP.1") — clean, no page number, with tone marks.
-   - "draft_date" = the leading 6- or 8-digit number formatted as DD/MM/YY or DD/MM/YYYY (e.g., "290669" → "29/06/69"). Use null if no draft date is present.
-
-OUTPUT:
-Return ONLY the JSON object matching the schema. No markdown fences, no commentary, no "here is the JSON". Just the JSON.`;
+Return ONLY the JSON object. No markdown, no commentary.`;
 
 const USER_PROMPT =
-  "Extract every scene from this Thai screenplay PDF using the rules in the system prompt. Return the structured JSON only.";
+  "Extract every scene from this Thai screenplay PDF using the rules. Return the JSON only.";
 
-interface ClaudeScene {
-  number: number;
-  type: string;
-  location: string;
-  time_of_day: string;
-  characters: string[];
-  extras: string[];
-}
-interface ClaudeOutput {
-  title: string | null;
-  draft_date: string | null;
-  scenes: ClaudeScene[];
+// Count pages from a PDF buffer using pdf.js (node-friendly legacy build).
+async function countPdfPages(data: ArrayBuffer): Promise<number> {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdf = await pdfjs.getDocument({
+    data: new Uint8Array(data),
+    useSystemFonts: true,
+    isEvalSupported: false,
+  }).promise;
+  return pdf.numPages;
 }
 
 export async function POST(request: NextRequest) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error:
-          "Server is missing ANTHROPIC_API_KEY. Set it in .env.local (dev) or your Vercel project's environment variables.",
-      },
-      { status: 500 },
-    );
-  }
+  // 1. Auth
+  const user = await getAuthedUser();
+  if (!user) return NextResponse.json({ error: "Please sign in to parse." }, { status: 401 });
 
+  // 2. Read file
   let file: File;
   try {
     const formData = await request.formData();
     const f = formData.get("file");
     if (!(f instanceof File)) {
-      return NextResponse.json({ error: "No PDF uploaded under 'file' field." }, { status: 400 });
+      return NextResponse.json({ error: "No PDF uploaded." }, { status: 400 });
     }
     file = f;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: `Bad request: ${msg}` }, { status: 400 });
   }
-
   if (file.size > 32 * 1024 * 1024) {
-    return NextResponse.json(
-      { error: "PDF exceeds 32MB. Compress it before uploading." },
-      { status: 413 },
-    );
+    return NextResponse.json({ error: "PDF exceeds 32MB." }, { status: 413 });
   }
 
-  const base64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+  // 3. Pre-flight: count pages → credits required
+  const buf = await file.arrayBuffer();
+  const pageCount = await countPdfPages(buf);
+  const creditsRequired = creditsForPages(pageCount);
+
+  // 4. Credit check (admins bypass)
+  const dbUser = user.isAdmin ? null : await getOrCreateUser(user.clerkId, user.email);
+  if (!user.isAdmin) {
+    if (!dbUser) return NextResponse.json({ error: "User record missing." }, { status: 500 });
+    if (dbUser.credits < creditsRequired) {
+      return NextResponse.json(
+        {
+          error: "Not enough credits.",
+          required: creditsRequired,
+          balance: dbUser.credits,
+          pageCount,
+          pagesPerCredit: PAGES_PER_CREDIT,
+        },
+        { status: 402 },
+      );
+    }
+  }
+
+  // 5. Parse with Claude
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json({ error: "ANTHROPIC_API_KEY missing." }, { status: 500 });
+  }
   const client = new Anthropic({ apiKey });
+  const base64 = Buffer.from(buf).toString("base64");
+  const t0 = Date.now();
+
+  let parsed: { title: string | null; draft_date: string | null; scenes: unknown[] };
+  let usage: { input_tokens: number; output_tokens: number };
 
   try {
-    // Streaming is required because long responses can blow past the SDK's
-    // ~10 minute HTTP timeout (SDK refuses non-streaming for big max_tokens).
     const stream = client.messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: 32000,
       thinking: { type: "adaptive" },
       output_config: {
-        format: {
-          type: "json_schema",
-          schema: SCREENPLAY_SCHEMA,
-        },
+        format: { type: "json_schema", schema: SCREENPLAY_SCHEMA },
       },
       system: SYSTEM_PROMPT,
       messages: [
         {
           role: "user",
           content: [
-            {
-              type: "document",
-              source: {
-                type: "base64",
-                media_type: "application/pdf",
-                data: base64,
-              },
-            },
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
             { type: "text", text: USER_PROMPT },
           ],
         },
       ],
     });
-
     const message = await stream.finalMessage();
-
     if (message.stop_reason === "refusal") {
-      return NextResponse.json(
-        {
-          error: "Claude refused to process this PDF.",
-          stop_details: message.stop_details,
-        },
-        { status: 422 },
-      );
+      return NextResponse.json({ error: "Claude refused this PDF." }, { status: 422 });
     }
     if (message.stop_reason === "max_tokens") {
-      return NextResponse.json(
-        { error: "Output truncated at max_tokens. PDF may be unusually long — split and retry." },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: "Output truncated — PDF too long." }, { status: 500 });
     }
-
-    const textBlock = message.content.find(
-      (b): b is Extract<typeof b, { type: "text" }> => b.type === "text",
-    );
+    const textBlock = message.content.find((b): b is Extract<typeof b, { type: "text" }> => b.type === "text");
     if (!textBlock) {
-      return NextResponse.json(
-        { error: "Claude returned no text block.", stop_reason: message.stop_reason },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: "Claude returned no text." }, { status: 500 });
     }
-
-    let parsed: ClaudeOutput;
-    try {
-      parsed = JSON.parse(textBlock.text) as ClaudeOutput;
-    } catch {
-      return NextResponse.json(
-        {
-          error: "Claude response was not valid JSON.",
-          raw: textBlock.text.slice(0, 2000),
-        },
-        { status: 500 },
-      );
-    }
-
-    return NextResponse.json({
-      title: parsed.title,
-      draft_date: parsed.draft_date,
-      scenes: parsed.scenes,
-      usage: {
-        input_tokens: message.usage.input_tokens,
-        output_tokens: message.usage.output_tokens,
-        cache_creation_input_tokens: message.usage.cache_creation_input_tokens,
-        cache_read_input_tokens: message.usage.cache_read_input_tokens,
-      },
-    });
+    parsed = JSON.parse(textBlock.text);
+    usage = { input_tokens: message.usage.input_tokens, output_tokens: message.usage.output_tokens };
   } catch (error) {
     if (error instanceof Anthropic.RateLimitError) {
-      return NextResponse.json(
-        { error: "Rate limited by Anthropic API. Retry in a moment." },
-        { status: 429 },
-      );
-    }
-    if (error instanceof Anthropic.AuthenticationError) {
-      return NextResponse.json(
-        { error: "ANTHROPIC_API_KEY is invalid. Check your Anthropic console." },
-        { status: 401 },
-      );
+      return NextResponse.json({ error: "Rate limited — retry shortly." }, { status: 429 });
     }
     if (error instanceof Anthropic.APIError) {
-      return NextResponse.json(
-        { error: `Anthropic API error: ${error.message}` },
-        { status: error.status ?? 500 },
-      );
+      return NextResponse.json({ error: `Claude API error: ${error.message}` }, { status: error.status ?? 500 });
     }
     const msg = error instanceof Error ? error.message : String(error);
-    console.error("Claude parse error:", msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
+
+  const durationMs = Date.now() - t0;
+
+  // 6. Deduct credits + log parse (admin: log only, no deduction)
+  let newBalance: number | null = null;
+  if (!user.isAdmin && dbUser) {
+    try {
+      newBalance = await deductCredits(dbUser.id, creditsRequired);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Race: someone else used credits; surface but don't fail the parse already done.
+      console.error("Credit deduction failed after parse:", msg);
+    }
+    const db = supabaseAdmin();
+    await db.from("parses").insert({
+      user_id: dbUser.id,
+      pdf_name: file.name,
+      page_count: pageCount,
+      credits_used: creditsRequired,
+      scenes_count: parsed.scenes.length,
+      status: "succeeded",
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      duration_ms: durationMs,
+    });
+  }
+
+  return NextResponse.json({
+    title: parsed.title,
+    draft_date: parsed.draft_date,
+    scenes: parsed.scenes,
+    meta: {
+      pageCount,
+      creditsUsed: user.isAdmin ? 0 : creditsRequired,
+      creditsRemaining: user.isAdmin ? "unlimited" : newBalance,
+      isAdmin: user.isAdmin,
+      durationMs,
+    },
+  });
 }

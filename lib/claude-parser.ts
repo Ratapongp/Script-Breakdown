@@ -11,40 +11,39 @@ interface ClaudeScene {
   extras: string[];
 }
 
+export interface ParseMeta {
+  pageCount: number;
+  creditsUsed: number;
+  creditsRemaining: number | "unlimited";
+  isAdmin: boolean;
+  durationMs: number;
+}
+
 interface ClaudeApiResponse {
   title: string | null;
   draft_date: string | null;
   scenes: ClaudeScene[];
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number | null;
-    cache_read_input_tokens?: number | null;
-  };
+  meta?: ParseMeta;
 }
 
 function normaliseType(raw: string): SceneType {
   const t = raw.toUpperCase().trim();
-  if (
-    t === "INT" ||
-    t === "EXT" ||
-    t === "INT/EXT" ||
-    t === "MONTAGE" ||
-    t === "FLASHBACK" ||
-    t === "DREAM" ||
-    t === "PRESENT" ||
-    t === "INTERCUT" ||
-    t === "SERIES OF SHOTS"
-  ) {
-    return t;
-  }
-  return "INT";
+  const allowed: SceneType[] = [
+    "INT", "EXT", "INT/EXT", "MONTAGE", "FLASHBACK",
+    "DREAM", "PRESENT", "INTERCUT", "SERIES OF SHOTS",
+  ];
+  return (allowed.includes(t as SceneType) ? (t as SceneType) : "INT");
+}
+
+export interface ClaudeParseResult {
+  doc: ScreenplayDoc;
+  meta?: ParseMeta;
 }
 
 export async function parseScreenplayPdfWithClaude(
   data: ArrayBuffer,
   opts: { sourceName?: string } = {},
-): Promise<ScreenplayDoc> {
+): Promise<ClaudeParseResult> {
   const form = new FormData();
   form.append(
     "file",
@@ -53,18 +52,24 @@ export async function parseScreenplayPdfWithClaude(
   );
 
   const res = await fetch("/api/parse", { method: "POST", body: form });
-  if (!res.ok) {
-    let detail = "";
-    try {
-      const j = await res.json();
-      detail = j.error ?? JSON.stringify(j);
-    } catch {
-      detail = await res.text();
-    }
-    throw new Error(`Claude parse failed (${res.status}): ${detail}`);
-  }
+  const json = (await res.json()) as ClaudeApiResponse & {
+    error?: string;
+    required?: number;
+    balance?: number;
+    pageCount?: number;
+  };
 
-  const json = (await res.json()) as ClaudeApiResponse;
+  if (!res.ok) {
+    if (res.status === 402) {
+      throw new Error(
+        `เครดิตไม่พอ — บทหนัง ${json.pageCount} หน้า ใช้ ${json.required} credits แต่คุณเหลือ ${json.balance} credits`,
+      );
+    }
+    if (res.status === 401) {
+      throw new Error("กรุณา sign in ก่อนใช้งาน");
+    }
+    throw new Error(json.error ?? `Parse failed (${res.status})`);
+  }
 
   const scenes: Scene[] = json.scenes.map((s) => {
     const type = normaliseType(s.type);
@@ -82,12 +87,15 @@ export async function parseScreenplayPdfWithClaude(
   });
 
   return {
-    title: json.title ?? opts.sourceName?.replace(/\.[^.]+$/, ""),
-    draftDate: json.draft_date ?? undefined,
-    scenes,
-    totalScenes: scenes.length,
-    parsedAt: new Date(),
-    sourceName: opts.sourceName,
-    missingMarks: 0,
+    doc: {
+      title: json.title ?? opts.sourceName?.replace(/\.[^.]+$/, ""),
+      draftDate: json.draft_date ?? undefined,
+      scenes,
+      totalScenes: scenes.length,
+      parsedAt: new Date(),
+      sourceName: opts.sourceName,
+      missingMarks: 0,
+    },
+    meta: json.meta,
   };
 }
