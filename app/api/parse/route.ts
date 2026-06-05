@@ -164,7 +164,8 @@ export async function POST(request: NextRequest) {
 
     try {
       const stream = client.messages.stream({
-        model: "claude-haiku-4-5",
+        model: "claude-sonnet-4-6",
+        thinking: { type: "enabled", budget_tokens: 10000 },
         max_tokens: 16000,
         output_config: {
           format: { type: "json_schema", schema: SCREENPLAY_SCHEMA },
